@@ -1,2 +1,2 @@
-if __name__ == "__main__":
-    main()
+def main():
+    send_telegram("TEST OK 🚀")
