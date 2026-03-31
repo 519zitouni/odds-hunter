@@ -1,7 +1,6 @@
 import os
 import requests
 import time
-from datetime import datetime
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -12,126 +11,89 @@ def send(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-# MATCHS DU JOUR
 def get_matches():
-    url = "https://v3.football.api-sports.io/fixtures?next=10"
+    url = "https://v3.football.api-sports.io/fixtures?next=5"
     headers = {"x-apisports-key": API_KEY}
 
-    res = requests.get(url, headers=headers).json()
-    matches = []
+    res = requests.get(url, headers=headers)
 
-    for m in res["response"]:
+    if res.status_code != 200:
+        return []
+
+    data = res.json()
+
+    matches = []
+    for m in data.get("response", []):
         matches.append({
             "home": m["teams"]["home"]["name"],
-            "away": m["teams"]["away"]["name"],
-            "league": m["league"]["name"]
+            "away": m["teams"]["away"]["name"]
         })
 
     return matches
 
-# COTES
 def get_odds():
     url = f"https://api.the-odds-api.com/v4/sports/soccer/odds/?apiKey={ODDS_KEY}&regions=eu&markets=h2h"
-    res = requests.get(url).json()
+    res = requests.get(url)
+
+    if res.status_code != 200:
+        return {}
+
+    data = res.json()
 
     odds_map = {}
 
-    for game in res:
-        home = game["home_team"]
-        away = game["away_team"]
-
+    for game in data:
         try:
+            home = game["home_team"]
+            away = game["away_team"]
+
             outcomes = game["bookmakers"][0]["markets"][0]["outcomes"]
+
             for o in outcomes:
                 odds_map[f"{home} vs {away}"] = o["price"]
+
         except:
             continue
 
     return odds_map
 
-# ANALYSE
-def analyze(match, odds):
-
-    score = 0
-
-    # logique bookmaker
-    if odds > 3:
-        score += 2
-
-    if 1.8 <= odds <= 2.2:
-        score += 2
-
-    # ligues fiables
-    top = ["Premier League", "Ligue 1", "La Liga", "Serie A", "Bundesliga"]
-    if match["league"] in top:
-        score += 1
-
-    # piège favori
-    if odds > 2.5:
-        score += 1
-
-    prob = 0.40 + (score * 0.07)
-    implied = 1 / odds
-    value = prob - implied
-
-    return prob, value, score
-
-# SELECTION
-def pick(matches, odds_map):
-
-    best_safe = None
-    best_value = None
-
-    for m in matches:
-
-        key = f"{m['home']} vs {m['away']}"
-        if key not in odds_map:
-            continue
-
-        odds = odds_map[key]
-        prob, value, score = analyze(m, odds)
-
-        if 1.9 <= odds <= 2.2:
-            if not best_safe or score > best_safe["score"]:
-                best_safe = {"match": key, "odds": odds, "prob": prob, "score": score}
-
-        if value > 0.07:
-            if not best_value or value > best_value["value"]:
-                best_value = {"match": key, "odds": odds, "prob": prob, "value": value}
-
-    return best_safe, best_value
-
-# MESSAGE
 def build():
+    try:
+        matches = get_matches()
+        odds_map = get_odds()
 
-    matches = get_matches()
-    odds_map = get_odds()
+        msg = "🔎 TEST BOT\n\n"
 
-    safe, value = pick(matches, odds_map)
+        msg += f"Matchs trouvés: {len(matches)}\n"
+        msg += f"Cotes trouvées: {len(odds_map)}\n\n"
 
-    date = datetime.now().strftime("%d/%m/%Y")
+        if not matches:
+            msg += "❌ Aucun match API FOOTBALL\n"
 
-    msg = f"🔥 ODDS HUNTER PRO\n📅 {date}\n\n"
+        if not odds_map:
+            msg += "❌ Aucune cote ODDS API\n"
 
-    if safe:
-        msg += f"🎯 SAFE\n{safe['match']}\nCote: {safe['odds']}\n\n"
+        # afficher 1 match exemple
+        if matches:
+            m = matches[0]
+            key = f"{m['home']} vs {m['away']}"
+            msg += f"\nExemple match:\n{key}\n"
 
-    if value:
-        msg += f"💎 VALUE\n{value['match']}\nCote: {value['odds']}\n\n"
+            if key in odds_map:
+                msg += f"Cote trouvée: {odds_map[key]}"
+            else:
+                msg += "⚠️ Pas de cote pour ce match"
 
-    msg += "📊 Analyse basée sur données réelles\n💰 Mise: 1-2% bankroll"
+        return msg
 
-    return msg
+    except Exception as e:
+        return f"❌ ERREUR: {str(e)}"
 
-# LOOP
 def main():
     while True:
-        try:
-            msg = build()
-            send(msg)
-            time.sleep(86400)
-        except:
-            time.sleep(300)
+        message = build()
+        send(message)
+        time.sleep(60)  # envoie toutes les 60 secondes pour test
 
 if __name__ == "__main__":
     main()
